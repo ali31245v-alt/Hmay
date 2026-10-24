@@ -1,6 +1,9 @@
 package com.example.strictlocker
 
 import android.app.Activity
+import android.app.admin.DevicePolicyManager
+import android.content.ComponentName
+import android.content.Intent
 import android.os.Bundle
 import android.os.SystemClock
 import android.graphics.Color
@@ -36,6 +39,7 @@ class PinActivity : Activity() {
     private lateinit var input: EditText
     private lateinit var primary: Button
     private lateinit var secondary: Button
+    private lateinit var adminButton: Button
     private lateinit var message: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -114,6 +118,8 @@ class PinActivity : Activity() {
         card.addView(primary, LinearLayout.LayoutParams(-1, dp(52)))
         secondary = makeButton("رجوع", false)
         card.addView(secondary, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(8) })
+        adminButton = makeButton("إدارة الجهاز / قفل الشاشة", false)
+        card.addView(adminButton, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(8) })
         root.addView(card, LinearLayout.LayoutParams(-1, -2))
 
         val footer = TextView(this).apply {
@@ -128,6 +134,7 @@ class PinActivity : Activity() {
     }
 
     private fun updateScreen() {
+        if (::adminButton.isInitialized) adminButton.visibility = View.GONE
         when (mode) {
             "setup" -> {
                 title.text = if (stage == 0) "أنشئ رمزك الخاص" else "تأكيد الرمز"
@@ -232,11 +239,14 @@ class PinActivity : Activity() {
         subtitle.text = "لوحة Strict Locker"
         input.visibility = View.GONE
         message.text = "رمزك محفوظ محليًا، ولا يوجد رمز افتراضي."
-        primary.text = "قفل الشاشة"
+        primary.text = "قفل التطبيق"
         secondary.visibility = View.VISIBLE
         secondary.text = "تغيير رمز PIN"
+        adminButton.visibility = View.VISIBLE
+        adminButton.text = if (isAdminActive()) "قفل الجهاز الآن" else "تفعيل إدارة الجهاز"
         primary.setOnClickListener { mode = "entry"; input.visibility = View.VISIBLE; input.setText(""); updateScreen() }
         secondary.setOnClickListener { mode = "change-old"; input.visibility = View.VISIBLE; input.setText(""); updateScreen() }
+        adminButton.setOnClickListener { lockDeviceOrRequestAdmin() }
         val note = TextView(this).apply {
             text = "تنبيه: هذا القفل يعمل داخل التطبيق فقط. يمكن لمالك الجهاز إيقاف التطبيق أو إزالة تثبيته من إعدادات Android."
             textSize = 12f
@@ -246,6 +256,30 @@ class PinActivity : Activity() {
         }
         // Add the note only once for this rendered screen.
         if (root.childCount < 4) root.addView(note)
+    }
+
+    private fun isAdminActive(): Boolean {
+        val manager = getSystemService(DEVICE_POLICY_SERVICE) as DevicePolicyManager
+        return manager.isAdminActive(ComponentName(this, AdminReceiver::class.java))
+    }
+
+    private fun lockDeviceOrRequestAdmin() {
+        val component = ComponentName(this, AdminReceiver::class.java)
+        val manager = getSystemService(DEVICE_POLICY_SERVICE) as DevicePolicyManager
+        if (manager.isAdminActive(component)) {
+            try {
+                manager.lockNow()
+            } catch (_: SecurityException) {
+                Toast.makeText(this, "تعذر قفل الجهاز. تحقق من تفعيل إدارة الجهاز.", Toast.LENGTH_LONG).show()
+            }
+        } else {
+            val intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
+                putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, component)
+                putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION,
+                    "تسمح هذه الصلاحية للتطبيق بقفل شاشة جهازك عند ضغطك على زر قفل الجهاز. يمكنك إلغاء تفعيلها من إعدادات الأمان.")
+            }
+            startActivity(intent)
+        }
     }
 
     private fun validPin(value: String) = value.length in 4..8 && value.all { it in '0'..'9' }
